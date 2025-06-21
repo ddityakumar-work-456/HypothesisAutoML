@@ -1,3 +1,6 @@
+# -----------------------------------------------------
+# Hypothesis AutoML – Research Enhanced Full App (Final)
+# -----------------------------------------------------
 import streamlit as st
 import numpy as np
 import pandas as pd
@@ -39,14 +42,10 @@ import lime.lime_tabular
 # Prompts, JSON Parsing, Groq Handling
 # -----------------------------------
 class PromptHandler:
-    """Handles all interactions with Groq API and prompt engineering"""
-
     def __init__(self, api_key):
-        # Initialize Groq client with API key
         self.client = Groq(api_key=api_key)
 
     def call_groq(self, prompt):
-        """Sends prompt to Groq API and returns response"""
         return (
             self.client.chat.completions.create(
                 messages=[{"role": "user", "content": prompt}],
@@ -58,16 +57,12 @@ class PromptHandler:
         )
 
     def extract_first_json_array(self, text):
-        """Extracts and validates first JSON array from text response"""
-        # Use regex to find JSON blocks
         json_blocks = re.findall(r"\[\s*{.*?}\s*]", text, re.DOTALL)
         for block in json_blocks:
-            # Handle scientific notation in JSON
             block = re.sub(
-                r"10\\^(-?\\d+)", lambda m: str(10 ** int(m.group(1))), block
+                r"10\\\\\^(-?\\\\\d+)", lambda m: str(10 ** int(m.group(1))), block
             )
             try:
-                # Parse JSON and validate structure
                 features = json.loads(block)
                 required_keys = {
                     "name",
@@ -78,18 +73,15 @@ class PromptHandler:
                     "range_max",
                     "units",
                 }
-                # Check if all required keys are present
                 if all(
                     isinstance(item, dict) and required_keys.issubset(item.keys())
                     for item in features
                 ):
                     return features
             except json.JSONDecodeError:
-                continue  # Skip invalid JSON
+                continue
 
     def generate_features_from_hypothesis(self, hypothesis, mode):
-        """Generates feature definitions based on hypothesis and mode"""
-        # Define prompt variations based on selected mode
         realism_prompt = {
             "Scientific Realism": "Only generate measurable features using physical science.",
             "Mirror World Magic": (
@@ -100,10 +92,9 @@ class PromptHandler:
             "Analogical Simulation": "Use creative and plausible analogies.",
         }.get(mode, "Use creative and plausible analogies.")
 
-        # Construct the prompt
         prompt = f"""
         Hypothesis: '{hypothesis}'
-        Generate exactly 10 features as a JSON array with:
+        Generate exactly 20 features as a JSON array with:
         - name, description, analogy_to_real_world, analogy_description
         - range_min, range_max, units
         - distribution_type (normal, lognormal, uniform)
@@ -112,17 +103,19 @@ class PromptHandler:
         Return only the JSON array.
         """
 
-        # Get response from Groq
         content = self.call_groq(prompt)
-        try:
-            return self.extract_first_json_array(content)
-        except:
-            # Attempt to fix malformed JSON
-            fix_prompt = f"The following JSON is malformed. Please fix it and return only JSON:\n{content}"
-            return self.extract_first_json_array(self.call_groq(fix_prompt))
+
+        # print(content)
+        features = self.extract_first_json_array(content)
+
+        if not features:
+            fix_prompt = f"The following JSON is malformed or empty. Please fix it and return only a valid JSON array:\n{content}"
+            fixed_content = self.call_groq(fix_prompt)
+            features = self.extract_first_json_array(fixed_content)
+
+        return features
 
     def generate_logical_rule(self, hypothesis, feature_names):
-        """Generates a classification rule using features"""
         prompt = f"""
         You are a top-tier AI scientist. Create a Python rule using 5 features to classify:
         Hypothesis: {hypothesis}
@@ -135,18 +128,13 @@ class PromptHandler:
             return 0
         ```
         """
-        # Get rule from Groq and extract the code block
         response = self.call_groq(prompt)
         match = re.search(r"if .*", response, re.DOTALL)
         return match.group(0).strip() if match else "if True: return 1 else: return 0"
 
     def generate_reasoning_report(self, hypothesis, feature_names, df):
-        """Generates analysis report based on synthetic data"""
-        # Create sample data for the report
         sample_json = df.head(20).to_json(orient="records")
         features_str = ", ".join(feature_names)
-
-        # Construct analysis prompt
         prompt = f"""
         Analyze this synthetic dataset for hypothesis: \"{hypothesis}\"
         Features: {features_str}
@@ -161,80 +149,72 @@ class PromptHandler:
         """
         return self.call_groq(prompt)
 
+    def generate_flow_chart(self, hypothesis):
+        prompt = f"""
+        Assume you are a top-level scientist, engineer, and systems architect with
+        unlimited access to advanced materials, energy sources, AI, quantum 
+        computers, and infrastructure. Your mission is to achieve the following 
+        hypothesis through physical construction and implementation alone — not 
+        simulations, theories, or research.
 
-# -----------------
-# Plotting Utilities
-# -----------------
-class PlotUtils:
-    """Handles all visualization components"""
+        🔬 Hypothesis:
+        {hypothesis}
 
-    @staticmethod
-    def plot_confusion_matrix(y_true, y_pred):
-        """Plots confusion matrix"""
-        fig, ax = plt.subplots()
-        sns.heatmap(
-            confusion_matrix(y_true, y_pred), annot=True, fmt="d", cmap="Blues", ax=ax
-        )
-        ax.set_xlabel("Predicted")
-        ax.set_ylabel("Actual")
-        st.pyplot(fig)
+        Create a wireframe execution blueprint that covers how to achieve
+        this hypothesis in the real world using physical machines, infrastructure, and systems.
 
-    @staticmethod
-    def plot_roc_curve(y_true, y_scores):
-        """Plots ROC curve with AUC score"""
-        fpr, tpr, _ = roc_curve(y_true, y_scores)
-        fig, ax = plt.subplots()
-        ax.plot(fpr, tpr, label=f"ROC AUC = {auc(fpr, tpr):.2f}")
-        ax.plot([0, 1], [0, 1], linestyle="--")
-        ax.set_xlabel("FPR")
-        ax.set_ylabel("TPR")
-        ax.legend()
-        st.pyplot(fig)
+        Do not include R&D, simulations, theoretical proofs, or 
+        validation discussions. Focus only on designing and building what’s 
+        needed to make it real.
 
-    @staticmethod
-    def apply_kmeans_and_plot(df, n_clusters=2):
-        """Applies K-Means clustering and visualizes results"""
-        st.subheader("🔍 K-Means Clustering Analysis")
-        # Prepare data for clustering
-        X_cluster = df.drop("target", axis=1)
-        X_cluster = SimpleImputer().fit_transform(X_cluster)
-        X_scaled = StandardScaler().fit_transform(X_cluster)
+        🧩 Your Plan Must Include:
+        ✅ Single Best Approach Chosen – from all possible methods
 
-        # Apply K-Means
-        kmeans = KMeans(n_clusters=n_clusters, random_state=42)
-        clusters = kmeans.fit_predict(X_scaled)
-        df["cluster"] = clusters
+        🏗️ Master Machine/Component List – what must be physically built
 
-        # Calculate and display silhouette score
-        score = silhouette_score(X_scaled, clusters)
-        st.metric("Silhouette Score", f"{score:.3f}")
+        🔃 Chronological Construction Order – step-by-step build phases
 
-        # Reduce dimensions for visualization
-        pca = PCA(n_components=2)
-        components = pca.fit_transform(X_scaled)
+        ⚙️ Purpose of Each Machine – what it does and how it connects
 
-        # Create cluster visualization
-        fig, ax = plt.subplots()
-        ax.scatter(
-            components[:, 0], components[:, 1], c=clusters, cmap="viridis", alpha=0.6
-        )
-        ax.set_title("K-Means Clustering (PCA)")
-        st.pyplot(fig)
-        return df
+        🔑 Trigger Mechanism & Operation – how the hypothesis is activated
+
+        🛡️ Safety, Control, and AI Systems – to prevent failure or danger
+
+        📋 Final Deployment Checklist – confirm readiness and launch
+
+        📚 Appendix – brief explanation of all complex terms used
+        """
+        return self.call_groq(prompt)
+
+    def generate_theory_snippets(self, hypothesis):
+        prompt = f"""
+        Hypothesis: {hypothesis}
+        Provide 3 short scientific theories or concepts that relate to or support this hypothesis. Each must be concise (max 2 lines).
+        """
+        return self.call_groq(prompt)
+
+    def suggest_scientific_experiments(self, hypothesis):
+        prompt = f"""
+        Hypothesis: {hypothesis}
+        Suggest 2-3 related scientific experiments (real or simulated) that can help test or explore this hypothesis. Be creative and concise.
+        """
+        return self.call_groq(prompt)
+
+    def generate_concept_notes(self, hypothesis):
+        prompt = f"""
+        Hypothesis: {hypothesis}
+        Provide foundational concept notes (max 5 bullet points) to help a non-expert understand the underlying science or logic behind the hypothesis.
+        """
+        return self.call_groq(prompt)
 
 
-# ----------------------
-# Model Training & Explain
-# ----------------------
+# --------------------------------------------
+# Model Training and Reporting
+# --------------------------------------------
 class ModelHandler:
-    """Handles model training and data generation"""
-
-    @staticmethod
-    def safe_eval_logic(row, logic_code):
-        """Safely evaluates classification rule on a data row"""
+    def safe_eval_logic(self, row, logic_code):
         local_vars = row.to_dict()
         try:
-            # Dynamically execute the classification rule
             exec(
                 f"def rule_fn():\n    {logic_code.replace('return', 'result =')}\n    return result",
                 globals(),
@@ -242,249 +222,270 @@ class ModelHandler:
             )
             return int(local_vars["rule_fn"]())
         except Exception:
-            # Fallback to random classification on error
             return random.randint(0, 1)
 
-    @staticmethod
-    def generate_features_with_correlation(feature_defs, correlations, n_samples):
-        """Generates synthetic data with user-defined feature correlations"""
-        # Map correlation strength to numerical values
-        strength_map = {"High": 0.9, "Medium": 0.5, "Low": 0.1}
+    # def generate_features_with_correlation(self, feature_defs, correlations, n_samples):
+    #     strength_map = {"High": 0.9, "Medium": 0.5, "Low": 0.1}
+    #     target_base = np.random.rand(n_samples)
+    #     df = pd.DataFrame()
+    #     for feature in feature_defs:
+    #         name = feature["name"]
+    #         strength = strength_map[correlations.get(name, "Medium")]
+    #         noise = np.random.normal(0, (1 - strength), n_samples)
+    #         signal = target_base * strength + noise
+    #         values = (signal - signal.min()) / (signal.max() - signal.min())
+    #         scaled = feature["range_min"] + values * (
+    #             feature["range_max"] - feature["range_min"]
+    #         )
+    #         df[name] = np.clip(scaled, feature["range_min"], feature["range_max"])
+    #     return df
 
-        # Create base signal for correlations
+    def generate_features_with_correlation(
+        self,
+        feature_defs,
+        correlations,
+        n_samples,
+        generate_target=True,
+        flip_ratio=0.2,
+    ):
+        """
+        Generates features with specified correlation to a synthetic target.
+        Optionally generates a binary target with noise for training ML models.
+
+        Parameters:
+            feature_defs (list): List of dicts with 'name', 'range_min', 'range_max'.
+            correlations (dict): Feature-to-correlation strength mapping.
+            n_samples (int): Number of data samples.
+            generate_target (bool): Whether to generate synthetic binary target.
+            flip_ratio (float): % of target labels to flip (for noise simulation).
+
+        Returns:
+            pd.DataFrame: DataFrame with features (and target if generate_target is True).
+        """
+
+        strength_map = {"High": 0.9, "Medium": 0.5, "Low": 0.1}
         target_base = np.random.rand(n_samples)
         df = pd.DataFrame()
 
-        # Generate each feature based on its definition
+        feature_weights = {}
         for feature in feature_defs:
             name = feature["name"]
-            # Get correlation strength for this feature
-            strength = strength_map[correlations.get(name, "Medium")]
-
-            # Create correlated signal with noise
+            strength = strength_map.get(correlations.get(name, "Medium"), 0.5)
             noise = np.random.normal(0, (1 - strength), n_samples)
             signal = target_base * strength + noise
-
-            # Scale to specified range
             values = (signal - signal.min()) / (signal.max() - signal.min())
             scaled = feature["range_min"] + values * (
                 feature["range_max"] - feature["range_min"]
             )
             df[name] = np.clip(scaled, feature["range_min"], feature["range_max"])
+            feature_weights[name] = np.round(
+                np.random.uniform(-2, 2), 2
+            )  # store random weight
+
+        if generate_target:
+            # Step 1: Generate target using logistic model
+            weights = [feature_weights[name] for name in df.columns]
+            w0 = np.random.uniform(-1, 1)  # bias
+            logit = w0 + np.dot(df.values, np.array(weights))
+            prob = 1 / (1 + np.exp(-logit))
+            df["target"] = np.random.binomial(1, prob)
+
+            # Step 2: Flip % of each class to simulate label noise
+            noisy_df = pd.DataFrame()
+            for label in df["target"].unique():
+                subset = df[df["target"] == label].copy()
+                flip_count = int(flip_ratio * len(subset))
+                if flip_count > 0:
+                    flip_indices = subset.sample(flip_count, random_state=42).index
+                    subset.loc[flip_indices, "target"] = 1 - label
+                noisy_df = pd.concat([noisy_df, subset], axis=0)
+
+            df = noisy_df.sample(frac=1, random_state=42).reset_index(drop=True)
+
         return df
 
-    @staticmethod
-    def generate_pdf_report(content):
-        """Generates PDF from analysis report content"""
+    def generate_pdf_report(self, content):
         if not content.strip():
             return None
         pdf = FPDF()
         pdf.add_page()
         pdf.set_auto_page_break(auto=True, margin=15)
         pdf.set_font("Arial", size=10)
-
-        # Add content to PDF
         for line in content.split("\n"):
             pdf.multi_cell(0, 10, line)
-
-        # Save PDF file
         path = "groq_report.pdf"
         pdf.output(path)
         return path
 
 
-# --------------------
-# Streamlit UI Handler
-# --------------------
+# --------------------------------------------
+# Full Application Logic
+# --------------------------------------------
 class HypothesisAutoMLApp:
-    """Main application class for Streamlit UI"""
-
     def __init__(self):
-        # Initialize components with Groq API key
         self.prompter = PromptHandler(
-            api_key="**********************************************************"
+            api_key="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"
         )
-        self.plotter = PlotUtils()
         self.modeler = ModelHandler()
 
     def run(self):
-        """Main application runner"""
-        # Configure Streamlit page
-        st.set_page_config(page_title="Hypothesis AutoML", layout="wide")
-        st.title("🔮 Hypothesis-Driven AutoML Simulator")
-        st.markdown("## 📘 How Feature Generation Works")
-        st.markdown("This app simulates features as if your hypothesis is true.")
-
-        # User inputs
-        hypothesis = st.text_input(
-            "🧠 Enter Hypothesis", "IAS success depends on study and mocks"
+        st.set_page_config(
+            page_title="Hypothesis AutoML - Research Tool", layout="wide"
         )
-        n_samples = st.slider("Samples", 100, 5000, 1000)
-        task_type = st.selectbox("Task", ["Classification", "Regression"])
-        mode = st.selectbox(
-            "Mode",
-            ["Analogical Simulation", "Scientific Realism", "Mirror World Magic"],
-        )
-        include_noise = st.checkbox("Add noise/edge cases", True)
+        st.title("🔬 Hypothesis Research & Modeling Simulator")
 
-        # Feature generation
-        if "feature_defs" not in st.session_state and st.button(
-            "🔮 Generate 20 Parameters"
-        ):
+        hypothesis = st.text_input("🧠 Enter Your Hypothesis")
+        if hypothesis:
+            st.markdown("---")
+            st.subheader("Solving the Unsolvable: A Step-By-Step Approach")
+            st.markdown(self.prompter.generate_flow_chart(hypothesis))
+
+            st.subheader("📖 Scientific Theories")
+            st.markdown(self.prompter.generate_theory_snippets(hypothesis))
+
+            # st.subheader("🔬 Suggested Experiments")
+            # st.markdown(self.prompter.suggest_scientific_experiments(hypothesis))
+
+            st.subheader("📒 Base Concept Notes")
+            st.markdown(self.prompter.generate_concept_notes(hypothesis))
+
+        if st.button("🔮 Generate Feature Candidates") and hypothesis:
+
             st.session_state.feature_defs = (
-                self.prompter.generate_features_from_hypothesis(hypothesis, mode)
+                self.prompter.generate_features_from_hypothesis(
+                    hypothesis, mode="Scientific Realism"
+                )
             )
 
-        # Data generation and modeling
         if "feature_defs" in st.session_state:
-            st.markdown("### 🔹 Correlation Strength (User Defined)")
-            correlations = {}
+            all_features = st.session_state.feature_defs
+            selected = st.multiselect(
+                "✅ Choose Features to Use for Modeling",
+                options=[
+                    f["name"] + "| [" + f["description"] + "]" for f in all_features
+                ],
+            )
 
-            # Display correlation controls for each feature
-            for f in st.session_state.feature_defs:
+            # print(selected)
+            selected_defs = [
+                f
+                for f in all_features
+                if f["name"] in [y.split("|")[0] for y in selected]
+            ]
+
+            # print(selected_defs)
+
+            correlations = {}
+            for feat in selected_defs:
                 scale = st.radio(
-                    f"{f['name']} ({f['description']})",
+                    f"{feat['name']} ({feat['description']})",
                     ["High", "Medium", "Low"],
                     horizontal=True,
-                    key=f"cor_{f['name']}",
+                    key=f"cor_{feat['name']}",
                 )
-                correlations[f["name"]] = scale
+                correlations[feat["name"]] = scale
 
-            if st.button("✅ Confirm Correlation Preferences & Generate Data"):
-                features = st.session_state.feature_defs
-                feature_names = [f["name"] for f in features]
-
-                # Generate synthetic data
+            if st.button("🚀 Run Modeling"):
                 df = self.modeler.generate_features_with_correlation(
-                    features, correlations, n_samples
+                    selected_defs, correlations, n_samples=1000
                 )
-
-                # Add noise/edge cases if requested
-                if include_noise:
-                    # Add outliers
-                    for col in df.columns[:1]:
-                        df.loc[df.sample(frac=0.05).index, col] *= random.choice(
-                            [10, 0.1]
-                        )
-                    # Add missing values
-                    for col in df.columns:
-                        df.loc[df.sample(frac=0.05).index, col] = np.nan
-
-                # Generate classification rule
                 logic_code = self.prompter.generate_logical_rule(
-                    hypothesis, feature_names
+                    hypothesis, [f["name"] for f in selected_defs]
                 )
-                # Apply rule to create target column
                 df["target"] = df.apply(
                     lambda row: self.modeler.safe_eval_logic(row, logic_code), axis=1
                 )
-                st.code(logic_code)
 
-                # Apply clustering and visualize
-                df = self.plotter.apply_kmeans_and_plot(df)
+                # Step 2: Flip 20% of labels per class (binary or multiclass)
+                noisy_df = pd.DataFrame()
+                all_labels = df["target"].unique().tolist()
 
-                # Prepare data for modeling
-                X = df.drop(["target", "cluster"], axis=1)
+                for label in all_labels:
+                    subset = df[df["target"] == label].copy()
+                    flip_count = int(0.3 * len(subset))
+
+                    if flip_count > 0:
+                        flip_indices = subset.sample(flip_count, random_state=42).index
+                        remaining_labels = [l for l in all_labels if l != label]
+                        subset.loc[flip_indices, "target"] = np.random.choice(
+                            remaining_labels, size=flip_count
+                        )
+
+                    noisy_df = pd.concat([noisy_df, subset], axis=0)
+
+                # Optional shuffle
+                df = noisy_df.sample(frac=1, random_state=42).reset_index(drop=True)
+
+                # df.to_csv("fyt.csv", index=False)
+                X = df.drop("target", axis=1)
                 y = df["target"]
-                X = SimpleImputer().fit_transform(X)
-                X = StandardScaler().fit_transform(X)
-                X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.3)
 
-                # Model selection based on task type
-                models = (
-                    {
-                        "Logistic Regression": LogisticRegression(),
-                        "Random Forest": RandomForestClassifier(),
-                        "Decision Tree": DecisionTreeClassifier(),
-                        "Neural Net": MLPClassifier(max_iter=500),
-                        "Naive Bayes": GaussianNB(),
-                        "AdaBoost": AdaBoostClassifier(),
-                        "SVM": SVC(probability=True),
-                    }
-                    if task_type == "Classification"
-                    else {"Linear Regression": LinearRegression()}
+                st.code(logic_code)
+                st.markdown("### 🔍 Clustering with PCA")
+                X_imp = SimpleImputer().fit_transform(X)
+                X_scaled = StandardScaler().fit_transform(X_imp)
+                # kmeans = KMeans(n_clusters=2, random_state=42)
+                # df["cluster"] = kmeans.fit_predict(X_scaled)
+                # pca = PCA(n_components=2)
+                # pca_res = pca.fit_transform(X_scaled)
+                # fig, ax = plt.subplots()
+                # ax.scatter(
+                #     pca_res[:, 0],
+                #     pca_res[:, 1],
+                #     c=df["cluster"],
+                #     cmap="viridis",
+                #     alpha=0.6,
+                # )
+                # ax.set_title("Clustering Visualization")
+                # st.pyplot(fig)
+
+                X_train, X_test, y_train, y_test = train_test_split(
+                    X_scaled, y, test_size=0.3
                 )
+                models = {
+                    "Logistic Regression": LogisticRegression(),
+                    "Random Forest": RandomForestClassifier(),
+                    "Neural Net": MLPClassifier(max_iter=500),
+                }
 
-                # Train and evaluate each model
                 for name, model in models.items():
                     st.subheader(name)
                     model.fit(X_train, y_train)
                     y_pred = model.predict(X_test)
+                    st.code(classification_report(y_test, y_pred))
 
-                    # Evaluation metrics
-                    if task_type == "Classification":
-                        st.code(classification_report(y_test, y_pred))
-                        try:
-                            # Plot ROC curve if possible
-                            y_score = model.predict_proba(X_test)[:, 1]
-                            self.plotter.plot_roc_curve(y_test, y_score)
-                        except:
-                            st.warning("ROC not available")
-                        self.plotter.plot_confusion_matrix(y_test, y_pred)
-                    else:
-                        # Regression metrics
-                        st.markdown(
-                            f"**MSE:** {mean_squared_error(y_test, y_pred):.2f}"
-                        )
-                        st.markdown(f"**R2:** {r2_score(y_test, y_pred):.2f}")
-
-                    # SHAP explainability
                     try:
-                        explainer = shap.Explainer(model, X_train)
-                        shap_values = explainer(X_test[:100])
-                        st.subheader("SHAP Summary")
+                        y_score = model.predict_proba(X_test)[:, 1]
+                        fpr, tpr, _ = roc_curve(y_test, y_score)
                         fig, ax = plt.subplots()
-                        shap.plots.beeswarm(shap_values, show=False)
+                        ax.plot(fpr, tpr, label=f"ROC AUC = {auc(fpr, tpr):.2f}")
+                        ax.plot([0, 1], [0, 1], linestyle="--")
+                        ax.legend()
                         st.pyplot(fig)
                     except:
-                        st.warning("SHAP failed")
+                        st.warning("ROC not available")
 
-                    # LIME explainability
                     try:
-                        lime_exp = lime.lime_tabular.LimeTabularExplainer(
-                            X_train,
-                            feature_names=df.drop(
-                                ["target", "cluster"], axis=1
-                            ).columns,
-                            class_names=(
-                                ["0", "1"] if task_type == "Classification" else []
-                            ),
-                            mode=(
-                                "classification"
-                                if task_type == "Classification"
-                                else "regression"
-                            ),
-                        )
-                        explanation = lime_exp.explain_instance(
-                            X_test[0],
-                            (
-                                model.predict_proba
-                                if task_type == "Classification"
-                                else model.predict
-                            ),
-                            num_features=5,
-                        )
-                        st.subheader("LIME Explanation")
-                        st.text(explanation.as_list())
+                        explainer = shap.Explainer(model, X_train)
+                        shap_vals = explainer(X_test[:100])
+                        st.subheader("SHAP Summary")
+                        fig, ax = plt.subplots()
+                        shap.plots.beeswarm(shap_vals, show=False)
+                        st.pyplot(fig)
                     except:
-                        st.warning("LIME failed")
+                        st.warning("SHAP not available")
 
-                # Generate AI reasoning report
                 st.header("📊 AI Reasoning Report")
-                with st.spinner("Groq generating insights..."):
-                    report = self.prompter.generate_reasoning_report(
-                        hypothesis, feature_names, df
-                    )
-                    st.markdown(report)
-                    path = self.modeler.generate_pdf_report(report)
-                    if path:
-                        with open(path, "rb") as f:
-                            st.download_button(
-                                "Download Report as PDF", f, file_name="AI_Report.pdf"
-                            )
-                st.caption(
-                    "Built by Aditya | Groq + SHAP + LIME + Clustering + Scaling + Correlation UI"
+                report = self.prompter.generate_reasoning_report(
+                    hypothesis, [f["name"] for f in selected_defs], df
                 )
+                st.markdown(report)
+                path = self.modeler.generate_pdf_report(report)
+                if path:
+                    with open(path, "rb") as f:
+                        st.download_button(
+                            "Download Report as PDF", f, file_name="AI_Report.pdf"
+                        )
 
 
 if __name__ == "__main__":
