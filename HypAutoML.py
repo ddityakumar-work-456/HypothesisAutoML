@@ -49,7 +49,7 @@ class PromptHandler:
         return (
             self.client.chat.completions.create(
                 messages=[{"role": "user", "content": prompt}],
-                model="llama3-70b-8192",
+                model="deepseek-r1-distill-llama-70b",
                 stream=False,
             )
             .choices[0]
@@ -239,7 +239,6 @@ class ModelHandler:
     #         )
     #         df[name] = np.clip(scaled, feature["range_min"], feature["range_max"])
     #     return df
-
     def generate_features_with_correlation(
         self,
         feature_defs,
@@ -249,48 +248,73 @@ class ModelHandler:
         flip_ratio=0.2,
     ):
         """
-        Generates features with specified correlation to a synthetic target.
-        Optionally generates a binary target with noise for training ML models.
+        Advanced synthetic feature and target generator with nonlinear effects,
+        interaction terms, and controlled label noise for better model training.
 
         Parameters:
             feature_defs (list): List of dicts with 'name', 'range_min', 'range_max'.
             correlations (dict): Feature-to-correlation strength mapping.
-            n_samples (int): Number of data samples.
-            generate_target (bool): Whether to generate synthetic binary target.
-            flip_ratio (float): % of target labels to flip (for noise simulation).
+            n_samples (int): Number of samples to generate.
+            generate_target (bool): Whether to generate a binary target.
+            flip_ratio (float): Percentage of target labels to flip (simulate noise).
 
         Returns:
-            pd.DataFrame: DataFrame with features (and target if generate_target is True).
+            pd.DataFrame: Generated dataset with features (and target).
         """
 
-        strength_map = {"High": 0.9, "Medium": 0.5, "Low": 0.1}
-        target_base = np.random.rand(n_samples)
-        df = pd.DataFrame()
+        # import numpy as np
+        # import pandas as pd
 
-        feature_weights = {}
+        strength_map = {"High": 0.9, "Medium": 0.5, "Low": 0.1}
+        base_signal = np.random.rand(n_samples)
+        df = pd.DataFrame()
+        weights = {}
+
+        # Step 1: Generate features with added nonlinearity
         for feature in feature_defs:
             name = feature["name"]
+            min_val, max_val = feature["range_min"], feature["range_max"]
             strength = strength_map.get(correlations.get(name, "Medium"), 0.5)
-            noise = np.random.normal(0, (1 - strength), n_samples)
-            signal = target_base * strength + noise
-            values = (signal - signal.min()) / (signal.max() - signal.min())
-            scaled = feature["range_min"] + values * (
-                feature["range_max"] - feature["range_min"]
-            )
-            df[name] = np.clip(scaled, feature["range_min"], feature["range_max"])
-            feature_weights[name] = np.round(
-                np.random.uniform(-2, 2), 2
-            )  # store random weight
 
+            # Apply a nonlinear transformation to the base signal
+            noise = np.random.normal(0, (1 - strength), n_samples)
+            nonlinearity = np.sin(2 * np.pi * base_signal * strength)
+            feature_signal = base_signal * strength + nonlinearity + noise
+
+            # Scale to desired range
+            values = (feature_signal - feature_signal.min()) / (
+                feature_signal.max() - feature_signal.min()
+            )
+            scaled = min_val + values * (max_val - min_val)
+            df[name] = np.clip(scaled, min_val, max_val)
+
+            # Store random weight
+            weights[name] = np.random.uniform(-3, 3)
+
+        # Step 2: Add interaction effects (feature1 * feature2)
+        interaction_terms = []
+        columns = list(df.columns)
+        for i in range(len(columns)):
+            for j in range(i + 1, len(columns)):
+                name_i, name_j = columns[i], columns[j]
+                interaction = df[name_i] * df[name_j]
+                col_name = f"{name_i}_{name_j}_interact"
+                df[col_name] = interaction
+                weights[col_name] = np.random.uniform(-2, 2)
+                interaction_terms.append(col_name)
+
+        # Step 3: Generate target using a nonlinear function
         if generate_target:
-            # Step 1: Generate target using logistic model
-            weights = [feature_weights[name] for name in df.columns]
-            w0 = np.random.uniform(-1, 1)  # bias
-            logit = w0 + np.dot(df.values, np.array(weights))
-            prob = 1 / (1 + np.exp(-logit))
+            feature_matrix = df.copy()
+            all_weights = np.array([weights[col] for col in feature_matrix.columns])
+            bias = np.random.uniform(-1, 1)
+
+            logit = bias + np.dot(feature_matrix.values, all_weights)
+            nonlinear_effect = 0.3 * np.sin(logit)  # Add nonlinearity to logit
+            prob = 1 / (1 + np.exp(-(logit + nonlinear_effect)))
             df["target"] = np.random.binomial(1, prob)
 
-            # Step 2: Flip % of each class to simulate label noise
+            # Step 4: Flip some labels for noise
             noisy_df = pd.DataFrame()
             for label in df["target"].unique():
                 subset = df[df["target"] == label].copy()
@@ -304,15 +328,23 @@ class ModelHandler:
 
         return df
 
+    # from fpdf import FPDF
+
     def generate_pdf_report(self, content):
         if not content.strip():
             return None
+
         pdf = FPDF()
         pdf.add_page()
         pdf.set_auto_page_break(auto=True, margin=15)
-        pdf.set_font("Arial", size=10)
+
+        # Add a Unicode-capable font (you must download this font and keep in your project)
+        pdf.add_font("DejaVu", "", "DejaVuSans.ttf", uni=True)
+        pdf.set_font("DejaVu", size=10)
+
         for line in content.split("\n"):
             pdf.multi_cell(0, 10, line)
+
         path = "groq_report.pdf"
         pdf.output(path)
         return path
@@ -324,7 +356,7 @@ class ModelHandler:
 class HypothesisAutoMLApp:
     def __init__(self):
         self.prompter = PromptHandler(
-            api_key="***************************************************"
+            api_key="######################################################"
         )
         self.modeler = ModelHandler()
 
@@ -338,16 +370,31 @@ class HypothesisAutoMLApp:
         if hypothesis:
             st.markdown("---")
             st.subheader("Solving the Unsolvable: A Step-By-Step Approach")
-            st.markdown(self.prompter.generate_flow_chart(hypothesis))
+            stu_prompt = self.prompter.generate_flow_chart(hypothesis)
+
+            if "</think>" in stu_prompt:
+                stu_prompt = stu_prompt.split("</think>")[1]
+
+            st.markdown(stu_prompt)
 
             st.subheader("📖 Scientific Theories")
-            st.markdown(self.prompter.generate_theory_snippets(hypothesis))
+            st_prompt = self.prompter.generate_theory_snippets(hypothesis)
+
+            if "</think>" in st_prompt:
+                st_prompt = st_prompt.split("</think>")[1]
+
+            st.markdown(st_prompt)
 
             # st.subheader("🔬 Suggested Experiments")
             # st.markdown(self.prompter.suggest_scientific_experiments(hypothesis))
 
             st.subheader("📒 Base Concept Notes")
-            st.markdown(self.prompter.generate_concept_notes(hypothesis))
+            bct_prompt = self.prompter.generate_concept_notes(hypothesis)
+
+            if "</think>" in bct_prompt:
+                bct_prompt = bct_prompt.split("</think>")[1]
+
+            st.markdown(bct_prompt)
 
         if st.button("🔮 Generate Feature Candidates") and hypothesis:
 
@@ -480,12 +527,12 @@ class HypothesisAutoMLApp:
                     hypothesis, [f["name"] for f in selected_defs], df
                 )
                 st.markdown(report)
-                path = self.modeler.generate_pdf_report(report)
-                if path:
-                    with open(path, "rb") as f:
-                        st.download_button(
-                            "Download Report as PDF", f, file_name="AI_Report.pdf"
-                        )
+                # path = self.modeler.generate_pdf_report(report)
+                # if path:
+                #     with open(path, "rb") as f:
+                #         st.download_button(
+                #             "Download Report as PDF", f, file_name="AI_Report.pdf"
+                #         )
 
 
 if __name__ == "__main__":
