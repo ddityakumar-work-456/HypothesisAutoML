@@ -324,7 +324,7 @@ class ModelHandler:
 class HypothesisAutoMLApp:
     def __init__(self):
         self.prompter = PromptHandler(
-            api_key="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"
+            api_key="***************************************************"
         )
         self.modeler = ModelHandler()
 
